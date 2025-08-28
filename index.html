@@ -6,14 +6,14 @@
   <title>集合しやすい駅サーチ（HTML-only MVP）</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    :root{ --bg:#F7F7F7; --card:#fff; --ink:#111; --muted:#666; --accent:#111; }
+    :root{ --bg:#F7F7F7; --card:#fff; --ink:#111; --muted:#666; }
     html,body{ height:100%; }
-    body{ margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
     .wrap{ display:grid; grid-template-columns: 380px 1fr; gap:12px; height:100%; padding:12px; box-sizing:border-box; }
-    .card{ background:var(--card); border-radius:16px; box-shadow: 0 6px 20px rgba(0,0,0,.06); padding:14px; display:flex; flex-direction:column; }
+    .card{ background:var(--card); border-radius:16px; box-shadow:0 6px 20px rgba(0,0,0,.06); padding:14px; display:flex; flex-direction:column; min-height:0; }
     .h{ font-size:18px; font-weight:700; margin:4px 0 8px; }
     .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .col{ display:flex; flex-direction:column; gap:6px; }
+    .col{ display:flex; flex-direction:column; gap:8px; }
     input,select,button{ padding:10px 12px; border-radius:12px; border:1px solid #ddd; font-size:14px; }
     button{ background:#111; color:#fff; cursor:pointer; border:none; }
     button.ghost{ background:#f3f3f3; color:#111; border:1px solid #e6e6e6; }
@@ -25,37 +25,44 @@
     .li:last-child{ border-bottom:none; }
     .pill{ display:inline-block; padding:2px 8px; border-radius:999px; background:#eee; font-size:12px; margin-right:6px; }
     .small{ font-size:12px; }
-    /* --- mobile fixes & sticky actions --- */
-    .panel{ min-height:0; max-height: calc(100vh - 24px); overflow:auto; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-    .sticky-actions{ position: sticky; bottom: 8px; background: var(--card); padding-top: 6px; box-shadow: 0 -6px 12px rgba(0,0,0,0.04); border-top-left-radius: 12px; border-top-right-radius: 12px; }
-    #calcBtn{ position:sticky; bottom:0; margin-top:auto; } /* スマホでもボタンが隠れないよう固定 */
-    @media (max-width: 980px){ .wrap{ grid-template-columns: 1fr; grid-template-rows: auto 1fr; } }
+
+    /* モバイル対応：左パネルはスクロール、下にstickyボタン。地図高さを明示 */
+    .panel{ max-height: calc(100vh - 24px); overflow:auto; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+    .sticky-actions{ position:sticky; bottom:8px; background:var(--card); padding-top:6px; box-shadow:0 -6px 12px rgba(0,0,0,0.04); border-top-left-radius:12px; border-top-right-radius:12px; }
+    #calcBtn{ width:100%; }
+    .leaflet-container{ touch-action: pan-x pan-y; } /* タッチ操作を確実に */
+
+    @media (max-width: 980px){
+      .wrap{ grid-template-columns: 1fr; grid-template-rows: auto minmax(55vh, 1fr); }
+      #map{ height:65vh; } /* 高さを明示して操作しやすく */
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
+    <!-- 左パネル -->
     <div class="card col panel">
       <div class="h">集合しやすい駅サーチ（MVP）</div>
-      <div class="muted">クリックで地点追加。住所検索も可。2地点以上で候補駅を提案します（徒歩＋電車の簡易推定）。</div>
+      <div class="muted">クリックで地点追加。住所/駅名検索も可。2地点以上で候補駅を提案します（徒歩＋電車の簡易推定）。</div>
 
       <div class="row">
-        <input id="searchInput" placeholder="住所/施設名/駅名 で追加（例：原宿、門前仲町）" style="flex:1;"/>
+        <input id="searchInput" placeholder="住所/施設名/駅名 で追加（例：原宿、門前仲町）" style="flex:1;">
         <button id="searchBtn">追加</button>
       </div>
       <div class="row">
         <button class="ghost" id="gpsBtn">現在地を追加</button>
         <button class="ghost" id="clearBtn">すべてクリア</button>
+        <button class="link" id="shareBtn" style="margin-left:auto">URL共有</button>
       </div>
 
-      <div class="col card" style="padding:10px; gap:8px;">
+      <div class="card col" style="gap:8px; padding:10px;">
         <div class="row" style="justify-content:space-between; align-items:center;">
           <div class="h" style="font-size:16px; margin:0;">参加地点 <span id="originCount" class="muted"></span></div>
-          <button class="link" id="shareBtn">URL共有</button>
         </div>
         <div id="originsList" class="list"></div>
       </div>
 
-      <div class="card col" style="gap:10px; flex:1; overflow:auto;">
+      <div class="card col" style="gap:10px;">
         <div class="h" style="font-size:16px; margin:0;">計算オプション</div>
         <div class="row">
           <label class="small">徒歩速度
@@ -78,7 +85,7 @@
             <select id="stretch">
               <option value="1.15">1.15（都市内 直線的）</option>
               <option value="1.25" selected>1.25（標準）</option>
-              <option value="1.4">1.40（遠回り気味）</option>
+              <option value="1.40">1.40（遠回り気味）</option>
             </select>
           </label>
           <label class="small">乗換ペナルティ
@@ -89,21 +96,300 @@
             </select>
           </label>
         </div>
+
+        <!-- ボタンを常に見える位置に -->
         <div class="row sticky-actions">
-          <button id="calcBtn" style="width:100%">候補駅を計算</button>
+          <button id="calcBtn">候補駅を計算</button>
         </div>
+
         <div id="result" class="col"></div>
       </div>
 
-      <div class="muted small">※ 本MVPはヒューリスティック推定です。実際のダイヤ・混雑・運休は考慮しません。将来的に公共交通API（Google/ナビタイム等）へ差し替え可能な構成です。</div>
+      <div class="muted small">※ 本MVPはヒューリスティック推定です。実際のダイヤ・混雑・運休は考慮しません。将来的に公共交通API（Google/ナビタイム等）へ差し替え可能です。</div>
     </div>
 
-    <div class="card" style="min-height:0;">
+    <!-- 右：地図 -->
+    <div class="card">
       <div id="map"></div>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- 以下のJSロジック部分は省略（既存のものを流用） -->
+  <script>
+    // =========================
+    // 地図セットアップ
+    // =========================
+    const map = L.map('map').setView([35.681236,139.767125], 12); // 東京駅
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    // レイアウト確定後にサイズ再計算（モバイルで効かなくなる対策）
+    setTimeout(()=> map.invalidateSize(), 0);
+    window.addEventListener('resize', ()=> map.invalidateSize());
+
+    const markers = new Map();   // id -> marker
+    let candidateMarkers = [];   // 駅候補のピン
+    let lines = [];              // 起点→駅の線
+
+    // =========================
+    // 参加地点の管理
+    // =========================
+    const origins = []; // {id,label,lat,lng}
+    const originList = document.getElementById('originsList');
+    const originCount = document.getElementById('originCount');
+
+    function uid(){ return Math.random().toString(36).slice(2,9); }
+
+    function addOrigin(lat,lng,label){
+      const id = uid();
+      const o = { id, label: label||`P${origins.length+1}`, lat, lng };
+      origins.push(o);
+      const m = L.marker([lat,lng]).addTo(map).bindPopup(`${o.label}<br>${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      markers.set(id,m);
+      renderOrigins();
+      updateURL();
+    }
+
+    function removeOrigin(id){
+      const idx = origins.findIndex(o=>o.id===id);
+      if(idx>=0){ origins.splice(idx,1); }
+      const m = markers.get(id); if(m){ map.removeLayer(m); markers.delete(id); }
+      renderOrigins();
+      updateURL();
+    }
+
+    function clearAll(){
+      [...markers.values()].forEach(m=>map.removeLayer(m));
+      markers.clear();
+      origins.splice(0,origins.length);
+      candidateMarkers.forEach(m=>map.removeLayer(m)); candidateMarkers=[];
+      lines.forEach(l=>map.removeLayer(l)); lines=[];
+      renderOrigins();
+      updateURL();
+    }
+
+    function renderOrigins(){
+      originCount.textContent = `（${origins.length}件）`;
+      originList.innerHTML = origins.map(o=>`
+        <div class="li">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <div>
+              <div style="font-weight:600;">${o.label}</div>
+              <div class="muted small">${o.lat.toFixed(5)}, ${o.lng.toFixed(5)}</div>
+            </div>
+            <button class="ghost" onclick="removeOrigin('${o.id}')">削除</button>
+          </div>
+        </div>`).join('');
+    }
+
+    // URL共有（?coords=lat,lng;...）
+    function updateURL(){
+      const coords = origins.map(o=>`${o.lat},${o.lng}`).join(';');
+      const url = new URL(location.href);
+      if(coords) url.searchParams.set('coords', coords); else url.searchParams.delete('coords');
+      history.replaceState({},'',url);
+    }
+    function parseURL(){
+      const q = new URLSearchParams(location.search).get('coords');
+      if(!q) return;
+      q.split(';').forEach((p)=>{
+        const [lat,lng] = p.split(',').map(Number);
+        if(Number.isFinite(lat)&&Number.isFinite(lng)) addOrigin(lat,lng,`P${origins.length+1}`);
+      });
+      if(origins.length){
+        const c = centroid(origins);
+        map.setView([c.lat,c.lng], 12);
+      }
+    }
+
+    // 地図クリックで追加
+    map.on('click', e=> addOrigin(e.latlng.lat, e.latlng.lng));
+
+    // =========================
+    // 検索（Nominatim）
+    // =========================
+    async function geocode(q){
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, { headers:{ 'Accept':'application/json' } });
+      if(!res.ok) throw new Error('geocoding failed');
+      const data = await res.json();
+      if(!data || !data.length) throw new Error('見つかりませんでした');
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    }
+
+    document.getElementById('searchBtn').onclick = async ()=>{
+      const q = document.getElementById('searchInput').value.trim();
+      if(!q) return;
+      try{
+        const p = await geocode(q);
+        addOrigin(p.lat, p.lng, q);
+        map.setView([p.lat,p.lng], 14);
+      }catch(e){ alert('検索に失敗：'+(e.message||e)); }
+    };
+
+    document.getElementById('gpsBtn').onclick = ()=>{
+      if(!navigator.geolocation){ alert('このブラウザでは位置情報が使えません'); return; }
+      navigator.geolocation.getCurrentPosition(pos=>{
+        addOrigin(pos.coords.latitude, pos.coords.longitude, 'Me');
+        map.setView([pos.coords.latitude, pos.coords.longitude], 14);
+      }, err=> alert('現在地エラー：'+err.message));
+    };
+
+    document.getElementById('clearBtn').onclick = clearAll;
+    document.getElementById('shareBtn').onclick = ()=>{
+      navigator.clipboard?.writeText(location.href);
+      alert('このページのURLをコピーしました');
+    };
+
+    // =========================
+    // 幾何ユーティリティ
+    // =========================
+    function haversineKm(a,b){
+      const R=6371; const dLat=(b.lat-a.lat)*Math.PI/180; const dLng=(b.lng-a.lng)*Math.PI/180;
+      const la1=a.lat*Math.PI/180, la2=b.lat*Math.PI/180;
+      const s=Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+      return 2*R*Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+    }
+    function centroid(arr){
+      const lat=arr.reduce((a,o)=>a+o.lat,0)/arr.length;
+      const lng=arr.reduce((a,o)=>a+o.lng,0)/arr.length;
+      return {lat,lng};
+    }
+
+    // =========================
+    // 最寄り駅検索（Overpass）
+    // =========================
+    async function nearestStations(lat,lng, radiusList=[1200, 2500, 4000]){
+      for(const r of radiusList){
+        const query = `[out:json][timeout:25];(node[railway=station](around:${r},${lat},${lng});node[public_transport=station](around:${r},${lat},${lng}););out 20;`;
+        try{
+          const res = await fetch('https://overpass-api.de/api/interpreter', { method:'POST', body: query });
+          if(!res.ok) continue;
+          const data = await res.json();
+          const items = (data.elements||[]).map(el=>({ id:`${el.type}/${el.id}`, name: el.tags?.["name:ja"]||el.tags?.name||'(駅名不明)', lat: el.lat, lng: el.lon }));
+          if(items.length) return items;
+        }catch(e){ /* try next radius */ }
+      }
+      return [];
+    }
+
+    // 東京圏の主要ハブ（抜粋）
+    const HUBS = [
+      {name:'東京', lat:35.681236, lng:139.767125},
+      {name:'新宿', lat:35.690921, lng:139.700258},
+      {name:'渋谷', lat:35.659066, lng:139.700348},
+      {name:'池袋', lat:35.728926, lng:139.71038},
+      {name:'品川', lat:35.628471, lng:139.73876},
+      {name:'上野', lat:35.713768, lng:139.777254},
+      {name:'大手町', lat:35.685175, lng:139.765895},
+      {name:'日本橋', lat:35.682382, lng:139.773978},
+      {name:'押上', lat:35.710373, lng:139.813673},
+      {name:'北千住', lat:35.749345, lng:139.804702},
+      {name:'門前仲町', lat:35.671936, lng:139.796645},
+      {name:'原宿', lat:35.670239, lng:139.702331},
+      {name:'表参道', lat:35.665247, lng:139.712437},
+      {name:'六本木', lat:35.66283, lng:139.731667},
+      {name:'恵比寿', lat:35.646694, lng:139.710106}
+    ];
+
+    // =========================
+    // 駅ベース最適化（ヒューリスティック）
+    // =========================
+    function minutesWalk(km, kph){ return (km / kph) * 60; }
+    function minutesRail(km, factorMinPerKm, stretch){ return km * factorMinPerKm * stretch; }
+
+    async function computeBestStations(){
+      if(origins.length < 2){ alert('2地点以上を追加してください'); return; }
+
+      const walkKph = parseFloat(document.getElementById('walkSpeed').value);
+      const railFactor = parseFloat(document.getElementById('railFactor').value);
+      const stretch = parseFloat(document.getElementById('stretch').value);
+      const xferPenalty = parseFloat(document.getElementById('xferPenalty').value);
+
+      // 1) 各起点の最寄り駅（上位3つ）
+      const nearestPerOrigin = [];
+      for(const o of origins){
+        const st = await nearestStations(o.lat, o.lng);
+        st.sort((a,b)=> haversineKm(o, a) - haversineKm(o, b));
+        nearestPerOrigin.push(st.slice(0,3));
+      }
+
+      // 2) 候補駅 = 最寄り上位×3 + 主要ハブ
+      const candidateStationsMap = new Map();
+      HUBS.forEach(h=> candidateStationsMap.set(`hub:${h.name}`, {name:h.name, lat:h.lat, lng:h.lng}) );
+      nearestPerOrigin.flat().forEach(s=>{
+        const key = `${s.name}|${s.lat.toFixed(5)},${s.lng.toFixed(5)}`;
+        if(!candidateStationsMap.has(key)) candidateStationsMap.set(key, { name: s.name, lat:s.lat, lng:s.lng });
+      });
+      const candidates = [...candidateStationsMap.values()].slice(0,80);
+
+      // 3) 候補駅ごとのコスト（合計/最大）
+      const scored = candidates.map(c =>{
+        let total = 0; let maxOne = 0; const details=[];
+        for(const o of origins){
+          const nearest = nearestPerOrigin[origins.indexOf(o)][0] || { lat:o.lat, lng:o.lng, name:o.label };
+          const walkKm = haversineKm(o, nearest);
+          const walkMin = minutesWalk(walkKm, walkKph);
+          const railKm = haversineKm(nearest, c);
+          const railMin = minutesRail(railKm, railFactor, stretch) + xferPenalty; // MVP: 乗換1回分仮定
+          const cost = walkMin + railMin;
+          total += cost; if(cost>maxOne) maxOne = cost;
+          details.push({ label:o.label, walkMin, railMin, nearestName: nearest.name });
+        }
+        return { station:c, total, maxOne, details };
+      });
+
+      scored.sort((a,b)=> a.total===b.total ? a.maxOne-b.maxOne : a.total-b.total);
+
+      // 4) 表示（地図とリスト）
+      candidateMarkers.forEach(m=>map.removeLayer(m)); candidateMarkers=[];
+      lines.forEach(l=>map.removeLayer(l)); lines=[];
+      const top = scored.slice(0,5);
+      const res = document.getElementById('result');
+      res.innerHTML = '';
+
+      top.forEach((item,rank)=>{
+        const s = item.station;
+        const mk = L.marker([s.lat,s.lng], {
+          icon: L.divIcon({
+            className:'', iconSize:[30,30],
+            html:`<div style="transform:translate(-12px,-24px)"><svg width="28" height="28" viewBox="0 0 24 24"><path d="M12 2C8.1 2 5 5.1 5 9c0 5.3 7 13 7 13s7-7.7 7-13c0-3.9-3.1-7-7-7z" fill="#facc15" stroke="#111"/></svg></div>`
+          })
+        }).addTo(map).bindPopup(`${s.name}`);
+        candidateMarkers.push(mk);
+
+        origins.forEach((o,i)=>{
+          const n = nearestPerOrigin[i][0] || {lat:o.lat,lng:o.lng};
+          const seg1 = L.polyline([[o.lat,o.lng],[n.lat,n.lng]], { color:'#4F46E5' }).addTo(map);
+          const seg2 = L.polyline([[n.lat,n.lng],[s.lat,s.lng]], { color:'#111' }).addTo(map);
+          lines.push(seg1, seg2);
+        });
+
+        const totalTxt = Math.round(item.total);
+        const maxTxt = Math.round(item.maxOne);
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.style.gap = '6px';
+        div.style.marginTop = '8px';
+        div.innerHTML = `
+          <div class="row" style="justify-content:space-between;">
+            <div><span class="pill">#${rank+1}</span><b>${s.name}</b></div>
+            <div class="muted">合計 ${totalTxt} 分 / 最大 ${maxTxt} 分</div>
+          </div>
+          <div class="small">
+            ${item.details.map(d=>`<div>・${d.label}: 徒歩 約${Math.round(d.walkMin)}分（${d.nearestName||'最寄り'}）＋ 電車 約${Math.round(d.railMin)}分</div>`).join('')}
+          </div>`;
+        res.appendChild(div);
+      });
+
+      if(top.length){ map.setView([top[0].station.lat, top[0].station.lng], 12); }
+    }
+
+    document.getElementById('calcBtn').onclick = computeBestStations;
+
+    // 初期：URLのcoords読込
+    parseURL();
+  </script>
 </body>
 </html>
